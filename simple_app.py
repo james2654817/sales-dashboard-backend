@@ -1,12 +1,12 @@
 from flask import Flask, jsonify
 from flask_cors import CORS
 import requests
-from datetime import datetime
+from datetime import datetime import os
 
 app = Flask(__name__)
 CORS(app)
 
-NOTION_API_KEY = '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'
+NOTION_API_KEY = os.environ.get('NOTION_API_KEY', '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')
 NOTION_VERSION = '2022-06-28'
 
 # 定義所有資料庫的 ID 和其對應的店名欄位
