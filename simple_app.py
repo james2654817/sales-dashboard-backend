@@ -7,7 +7,7 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-NOTION_API_KEY = os.environ.get('NOTION_API_KEY', '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')
+NOTION_API_KEY = os.environ.get('NOTION_API_KEY', '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')
 NOTION_VERSION = '2022-06-28'
 
 # 定義所有資料庫的 ID 和其對應的店名欄位
