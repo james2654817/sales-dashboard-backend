@@ -23,10 +23,9 @@ HEADERS = {
     'Content-Type': 'application/json'
 }
 
-# 資料庫 ID
-DAILY_REPORT_DB = '279dbea45c5080bfa36ff665c8b26e88'
-HR_SALES_DB = '1dedbea45c508030bb51fbffeae7e0ae'
-MHP_SALES_DB = '1f9dbea45c5081709ea2f400fe43e816'
+# 資料庫 ID（只使用這兩個）
+HR_SALES_DB = '1dedbea45c508030bb51fbffeae7e0ae'      # 家根總營業額
+MHP_SALES_DB = '1f9dbea45c5081709ea2f400fe43e816'     # 時刻暖鍋營業額
 
 def get_users():
     """從環境變數讀取使用者資料"""
@@ -50,13 +49,13 @@ def verify_token(token):
     except:
         return None
 
-def fetch_notion_data(database_id, sorts=None):
+def fetch_notion_data(database_id, sorts=None, page_size=100):
     """從 Notion 資料庫獲取數據"""
     url = f'https://api.notion.com/v1/databases/{database_id}/query'
-    payload = {}
+    payload = {'page_size': page_size}
     if sorts:
         payload['sorts'] = sorts
-    response = requests.post(url, headers=HEADERS, json=payload)
+    response = requests.post(url, headers=HEADERS, json=payload, timeout=30)
     return response.json()
 
 def get_property_value(properties, prop_name, prop_type):
@@ -77,68 +76,109 @@ def get_property_value(properties, prop_name, prop_type):
         return formula_obj.get('number', 0) or 0 if formula_obj else 0
     return ''
 
-def get_latest_data():
-    """獲取最近一筆營業數據"""
-    sorts = [{"property": "營業日期", "direction": "descending"}]
-    data = fetch_notion_data(DAILY_REPORT_DB, sorts)
-    stores_latest = {}
-    for page in data.get('results', []):
-        props = page.get('properties', {})
-        store_name = get_property_value(props, '餐廳單位', 'select')
-        if '大同' in store_name:
-            display_name = '大同店'
-        elif '安平' in store_name:
-            display_name = '安平店'
-        elif '時刻' in store_name or '暖鍋' in store_name:
-            display_name = '時刻暖鍋'
-        else:
-            continue
-        if display_name not in stores_latest:
-            stores_latest[display_name] = {
-                'name': display_name,
-                'todaySales': get_property_value(props, '營業額', 'number'),
-                'todayCustomers': int(get_property_value(props, '來客數', 'number') or 0),
-                'todayAvgPrice': get_property_value(props, '客單價', 'number'),
-                'lastUpdate': get_property_value(props, '營業日期', 'date')
-            }
-    return stores_latest
-
-def get_monthly_total_hr():
-    """獲取家根本月累計"""
+def get_hr_data():
+    """從家根總營業額資料庫獲取大同和安平的數據"""
     taiwan_tz = pytz.timezone('Asia/Taipei')
     current_month = datetime.now(taiwan_tz).strftime('%Y-%m')
+    
+    # 按日期降序排序
     sorts = [{"property": "營業日期", "direction": "descending"}]
     data = fetch_notion_data(HR_SALES_DB, sorts)
-    monthly_totals = {'大同店': {'total': 0, 'customers': 0}, '安平店': {'total': 0, 'customers': 0}}
+    
+    # 初始化數據結構
+    stores_data = {
+        '大同店': {
+            'name': '大同店',
+            'latestDate': None,
+            'todaySales': 0,
+            'todayCustomers': 0,
+            'todayAvgPrice': 0,
+            'monthlyTotal': 0,
+            'monthlyCustomers': 0
+        },
+        '安平店': {
+            'name': '安平店',
+            'latestDate': None,
+            'todaySales': 0,
+            'todayCustomers': 0,
+            'todayAvgPrice': 0,
+            'monthlyTotal': 0,
+            'monthlyCustomers': 0
+        }
+    }
+    
     for page in data.get('results', []):
         props = page.get('properties', {})
+        
         sales_date = get_property_value(props, '營業日期', 'date')
+        branch = get_property_value(props, '分店', 'select')
+        total_sales = get_property_value(props, '總營業額', 'formula')
+        customer_count = get_property_value(props, '來客數', 'number')
+        avg_price = get_property_value(props, '客單價', 'formula')
+        
+        # 判斷是哪家店
+        if '大同' in branch:
+            store_key = '大同店'
+        elif '安平' in branch:
+            store_key = '安平店'
+        else:
+            continue
+        
+        # 記錄最新一筆數據（用於顯示今日營業額）
+        if stores_data[store_key]['latestDate'] is None:
+            stores_data[store_key]['latestDate'] = sales_date
+            stores_data[store_key]['todaySales'] = total_sales
+            stores_data[store_key]['todayCustomers'] = int(customer_count) if customer_count else 0
+            stores_data[store_key]['todayAvgPrice'] = avg_price
+        
+        # 累計本月數據
         if sales_date and sales_date.startswith(current_month):
-            branch = get_property_value(props, '分店', 'select')
-            total_sales = get_property_value(props, '總營業額', 'formula')
-            customer_count = get_property_value(props, '來客數', 'number')
-            if '大同' in branch:
-                monthly_totals['大同店']['total'] += total_sales
-                monthly_totals['大同店']['customers'] += customer_count
-            elif '安平' in branch:
-                monthly_totals['安平店']['total'] += total_sales
-                monthly_totals['安平店']['customers'] += customer_count
-    return monthly_totals
+            stores_data[store_key]['monthlyTotal'] += total_sales
+            stores_data[store_key]['monthlyCustomers'] += int(customer_count) if customer_count else 0
+    
+    return stores_data
 
-def get_monthly_total_mhp():
-    """獲取時刻暖鍋本月累計"""
+def get_mhp_data():
+    """從時刻暖鍋營業額資料庫獲取數據"""
     taiwan_tz = pytz.timezone('Asia/Taipei')
     current_month = datetime.now(taiwan_tz).strftime('%Y-%m')
+    
+    # 按日期降序排序
     sorts = [{"property": "營業日期", "direction": "descending"}]
     data = fetch_notion_data(MHP_SALES_DB, sorts)
-    monthly_total = {'total': 0, 'customers': 0}
+    
+    # 初始化數據結構
+    store_data = {
+        'name': '時刻暖鍋',
+        'latestDate': None,
+        'todaySales': 0,
+        'todayCustomers': 0,
+        'todayAvgPrice': 0,
+        'monthlyTotal': 0,
+        'monthlyCustomers': 0
+    }
+    
     for page in data.get('results', []):
         props = page.get('properties', {})
+        
         sales_date = get_property_value(props, '營業日期', 'date')
+        total_sales = get_property_value(props, '實收現金', 'formula')
+        customer_count = get_property_value(props, '來客數', 'number')
+        avg_price = get_property_value(props, '客單價', 'formula')
+        
+        # 記錄最新一筆數據
+        if store_data['latestDate'] is None:
+            store_data['latestDate'] = sales_date
+            store_data['todaySales'] = total_sales
+            store_data['todayCustomers'] = int(customer_count) if customer_count else 0
+            store_data['todayAvgPrice'] = avg_price
+        
+        # 累計本月數據
         if sales_date and sales_date.startswith(current_month):
-            monthly_total['total'] += get_property_value(props, '實收現金', 'formula')
-            monthly_total['customers'] += get_property_value(props, '來客數', 'number')
-    return monthly_total
+            store_data['monthlyTotal'] += total_sales
+            store_data['monthlyCustomers'] += int(customer_count) if customer_count else 0
+    
+    return store_data
 
 @app.route('/api/login', methods=['POST'])
 def login():
@@ -174,37 +214,59 @@ def get_sales():
         payload = verify_token(token)
         if not payload:
             return jsonify({'success': False, 'error': 'Token 無效或已過期'}), 401
+        
         permission = payload.get('permission', 'all')
-        stores_latest = get_latest_data()
-        hr_monthly = get_monthly_total_hr()
-        mhp_monthly = get_monthly_total_mhp()
         taiwan_tz = pytz.timezone('Asia/Taipei')
         current_month = datetime.now(taiwan_tz).strftime('%Y-%m')
         today = datetime.now(taiwan_tz).strftime('%Y-%m-%d')
-        if permission == 'hr':
-            store_names = ['大同店', '安平店']
-        elif permission == 'mhp':
-            store_names = ['時刻暖鍋']
-        else:
-            store_names = ['大同店', '安平店', '時刻暖鍋']
+        
+        # 獲取所有店面數據
+        hr_data = get_hr_data()
+        mhp_data = get_mhp_data()
+        
+        # 根據權限決定要顯示哪些店面
         final_data = []
-        for store_name in store_names:
-            if store_name in ['大同店', '安平店']:
-                store_data = stores_latest.get(store_name, {'name': store_name, 'todaySales': 0, 'todayCustomers': 0, 'todayAvgPrice': 0, 'lastUpdate': ''})
-                store_data['monthlyTotal'] = hr_monthly[store_name]['total']
-                store_data['monthlyCustomers'] = hr_monthly[store_name]['customers']
-                store_data['dataMonth'] = current_month
-                store_data['isToday'] = (store_data['lastUpdate'] == today)
-                final_data.append(store_data)
-            elif store_name == '時刻暖鍋':
-                store_data = stores_latest.get(store_name, {'name': store_name, 'todaySales': 0, 'todayCustomers': 0, 'todayAvgPrice': 0, 'lastUpdate': ''})
-                store_data['monthlyTotal'] = mhp_monthly['total']
-                store_data['monthlyCustomers'] = mhp_monthly['customers']
-                store_data['dataMonth'] = current_month
-                store_data['isToday'] = (store_data['lastUpdate'] == today)
-                final_data.append(store_data)
+        
+        if permission == 'hr':
+            # 家根儀表板：只顯示大同和安平
+            for store_name in ['大同店', '安平店']:
+                store = hr_data[store_name]
+                store['dataMonth'] = current_month
+                store['lastUpdate'] = store['latestDate']
+                store['isToday'] = (store['latestDate'] == today)
+                final_data.append(store)
+                
+        elif permission == 'mhp':
+            # 時刻儀表板：只顯示時刻暖鍋
+            mhp_data['dataMonth'] = current_month
+            mhp_data['lastUpdate'] = mhp_data['latestDate']
+            mhp_data['isToday'] = (mhp_data['latestDate'] == today)
+            final_data.append(mhp_data)
+            
+        else:
+            # 全店儀表板：顯示所有店面
+            for store_name in ['大同店', '安平店']:
+                store = hr_data[store_name]
+                store['dataMonth'] = current_month
+                store['lastUpdate'] = store['latestDate']
+                store['isToday'] = (store['latestDate'] == today)
+                final_data.append(store)
+            
+            mhp_data['dataMonth'] = current_month
+            mhp_data['lastUpdate'] = mhp_data['latestDate']
+            mhp_data['isToday'] = (mhp_data['latestDate'] == today)
+            final_data.append(mhp_data)
+        
+        # 計算今日總營業額（只計算今天的數據）
         today_total = sum(store['todaySales'] for store in final_data if store.get('isToday', False))
-        return jsonify({'success': True, 'data': final_data, 'todayTotal': today_total, 'todayDate': today, 'timestamp': datetime.now(taiwan_tz).isoformat()})
+        
+        return jsonify({
+            'success': True,
+            'data': final_data,
+            'todayTotal': today_total,
+            'todayDate': today,
+            'timestamp': datetime.now(taiwan_tz).isoformat()
+        })
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
