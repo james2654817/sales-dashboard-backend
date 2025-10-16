@@ -10,7 +10,7 @@ CORS(app)
 NOTION_API_KEY = os.environ.get('NOTION_API_KEY')
 if not NOTION_API_KEY:
     raise ValueError("NOTION_API_KEY environment variable is required")
-    NOTION_VERSION = '2022-06-28'
+NOTION_VERSION = '2022-06-28'  # ✅ 正確！與第 10 行對齊
 
 
 # 定義所有資料庫的 ID 和其對應的店名欄位
