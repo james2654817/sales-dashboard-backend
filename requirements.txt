@@ -3,3 +3,4 @@ Flask-CORS==4.0.0
 requests==2.31.0
 pytz==2024.1
 PyJWT==2.8.0
+gunicorn==21.2.0
