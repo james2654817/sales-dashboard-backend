@@ -7,8 +7,10 @@ import os
 app = Flask(__name__)
 CORS(app)
 
-NOTION_API_KEY = os.environ.get('NOTION_API_KEY', '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')
-NOTION_VERSION = '2022-06-28'
+NOTION_API_KEY = os.environ.get('NOTION_API_KEY')
+if not NOTION_API_KEY:
+    raise ValueError("NOTION_API_KEY environment variable is required")
+
 
 # 定義所有資料庫的 ID 和其對應的店名欄位
 DATABASE_CONFIGS = [
