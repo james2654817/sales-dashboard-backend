@@ -257,14 +257,33 @@ def get_sales():
             mhp_data['isToday'] = (mhp_data['latestDate'] == today)
             final_data.append(mhp_data)
         
-        # 計算今日總營業額（只計算今天的數據）
-        today_total = sum(store['todaySales'] for store in final_data if store.get('isToday', False))
+        # 計算最新營業日營業額（使用各店面最新資料）
+        latest_day_total = sum(store['todaySales'] for store in final_data)
+        
+        # 找出所有店面的日期
+        all_dates = [store['latestDate'] for store in final_data if store['latestDate']]
+        
+        # 判斷是否所有店面都是同一天
+        all_same_date = len(set(all_dates)) == 1 if all_dates else False
+        
+        # 找出最新日期和最舊日期
+        max_date = max(all_dates) if all_dates else today
+        min_date = min(all_dates) if all_dates else today
+        
+        # 分類店面：已回報最新日期 vs 資料較舊
+        latest_stores = [store['name'] for store in final_data if store['latestDate'] == max_date]
+        old_stores = [{'name': store['name'], 'date': store['latestDate']} 
+                      for store in final_data if store['latestDate'] != max_date]
         
         return jsonify({
             'success': True,
             'data': final_data,
-            'todayTotal': today_total,
-            'todayDate': today,
+            'latestDayTotal': latest_day_total,
+            'latestDate': max_date,
+            'allSameDate': all_same_date,
+            'dateRange': {'min': min_date, 'max': max_date},
+            'latestStores': latest_stores,
+            'oldStores': old_stores,
             'timestamp': datetime.now(taiwan_tz).isoformat()
         })
     except Exception as e:
